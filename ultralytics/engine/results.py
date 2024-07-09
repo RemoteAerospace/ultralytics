@@ -19,6 +19,7 @@ from ultralytics.utils.torch_utils import smart_inference_mode
 
 import socket
 import json
+import time
 
 class BaseTensor(SimpleClass):
     """Base tensor class with additional methods for easy manipulation and device handling."""
@@ -295,7 +296,8 @@ class Results(SimpleClass):
                 data = {
                             "id": id,
                             "coordinates": center,
-                            "type": names[c]
+                            "type": names[c],
+                            "time": int(time.time())
                         }
                 
                 message = json.dumps(data)
