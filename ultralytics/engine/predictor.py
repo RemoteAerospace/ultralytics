@@ -46,6 +46,7 @@ from ultralytics.utils import DEFAULT_CFG, LOGGER, MACOS, WINDOWS, callbacks, co
 from ultralytics.utils.checks import check_imgsz, check_imshow
 from ultralytics.utils.files import increment_path
 from ultralytics.utils.torch_utils import select_device, smart_inference_mode
+import subprocess
 
 STREAM_WARNING = """
 WARNING ⚠️ inference results will accumulate in RAM unless `stream=True` is passed, causing potential out-of-memory
@@ -111,6 +112,9 @@ class BasePredictor:
         self.txt_path = None
         self._lock = threading.Lock()  # for automatic thread-safe inference
         callbacks.add_integration_callbacks(self)
+
+        self.windows = []
+        self.process = None
 
     def preprocess(self, im):
         """
@@ -334,7 +338,7 @@ class BasePredictor:
         string += f"{result.verbose()}{result.speed['inference']:.1f}ms"
 
         # Add predictions to image
-        if self.args.save or self.args.show:
+        if self.args.save or self.args.show or self.args.stream:
             self.plotted_img = result.plot(
                 line_width=self.args.line_width,
                 boxes=self.args.show_boxes,
@@ -352,6 +356,8 @@ class BasePredictor:
             self.show(str(p))
         if self.args.save:
             self.save_predicted_images(str(self.save_dir / p.name), frame)
+        if self.args.stream:
+            self.rtsp_stream(self.args.stream)
 
         return string
 
@@ -401,3 +407,69 @@ class BasePredictor:
     def add_callback(self, event: str, func):
         """Add callback."""
         self.callbacks[event].append(func)
+
+    def rtsp_stream(self, backend=None):
+
+        im = self.plotted_img
+
+        if backend == "ffmpeg":
+            if self.process is None:
+                height, width, channels = im.shape
+                self.start_ffmpeg(width, height)
+
+            try:
+                self.process.stdin.write(im.tobytes())
+            except Exception as e:
+                print(f"Error writing to FFmpeg stdin: {e}")
+                self.process.stdin.close()
+                self.process = None
+        
+        if backend == "gst":
+            if self.process is None:
+                self.process = self.get_gs_pipe(width, height)
+
+            try:
+                self.out.write(im)
+            except Exception as e:
+                print(f"Error writing to gstreaner stdin: {e}")
+                self.process = None
+
+    def get_gs_pipe(self):
+        fps = 30    
+        width = 1280
+        height = 720
+        out = cv2.VideoWriter(
+        'appsrc ! video/x-raw,format=BGR,width={},height={},framerate={}/1'.format(width, height, fps) +
+        ' ! videoconvert' +
+        ' ! x264enc speed-preset=ultrafast tune=zerolatency' +  # H.264 encoding with low-latency settings
+        ' ! rtspclientsink location=rtsp://0.0.0.0:8554/jetson protocols=tcp',
+        cv2.CAP_GSTREAMER, 0, fps, (width, height), True)
+
+
+        if not out.isOpened():
+            print("can't open video writer")
+        else:
+            print("GS created")
+        return out
+        
+    def start_ffmpeg(self, width, height):
+        """Start FFmpeg process for streaming."""
+        command = [
+        'ffmpeg',
+        '-y',  # overwrite output file if it exists
+        '-f', 'rawvideo',  # format
+        '-vcodec', 'rawvideo',
+        '-pix_fmt', 'bgr24',  # pixel format
+        '-s', f'{width}x{height}',  # size of one frame
+        '-r', '30',  # frames per second
+        '-i', '-',  # The input comes from a pipe
+        '-an',  # Tells FFMPEG not to expect any audio
+        '-c:v', 'libx264',  # Video codec
+        '-preset', 'ultrafast',  # To keep the latency as low as possible
+        '-tune', 'zerolatency',  # Tune for zero latency
+        '-bufsize', '32k',  # Set buffer size
+        '-f', 'rtsp',  # RTSP output format
+        '-rtsp_transport', 'tcp',  # Use TCP for RTSP
+        'rtsp://0.0.0.0:8554/jetson'  # URL of the RTSP server
+    ]
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE)

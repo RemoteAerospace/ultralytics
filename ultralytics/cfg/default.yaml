@@ -66,6 +66,7 @@ embed: # (list[int], optional) return feature vectors/embeddings from given laye
 
 # Visualize settings ---------------------------------------------------------------------------------------------------
 show: False # (bool) show predicted images and videos if environment allows
+stream: ffmpeg # (str) ffmpeg or gst to stream output
 save_frames: False # (bool) save predicted individual video frames
 save_txt: False # (bool) save results as .txt file
 save_conf: False # (bool) save results with confidence scores

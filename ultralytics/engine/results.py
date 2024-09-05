@@ -17,6 +17,9 @@ from ultralytics.utils import LOGGER, SimpleClass, ops
 from ultralytics.utils.plotting import Annotator, colors, save_one_box
 from ultralytics.utils.torch_utils import smart_inference_mode
 
+import socket
+import json
+import time
 
 class BaseTensor(SimpleClass):
     """
@@ -268,6 +271,9 @@ class Results(SimpleClass):
         self.path = path
         self.save_dir = None
         self._keys = "boxes", "masks", "probs", "keypoints", "obb"
+
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
     def __getitem__(self, idx):
         """
@@ -538,6 +544,21 @@ class Results(SimpleClass):
                     color=colors(i if color_mode == "instance" else c, True),
                     rotated=is_obb,
                 )
+
+                box_cords = box.tolist()
+                x_center = (box_cords[0] + box_cords[2]) / 2
+                y_center = (box_cords[1] + box_cords[3]) / 2
+                center = [x_center, y_center]
+
+                data = {
+                            "id": id,
+                            "coordinates": center,
+                            "type": names[c],
+                            "time": int(time.time())
+                        }
+                
+                message = json.dumps(data)
+                self.server_socket.sendto(message.encode(), ("localhost", 34769))
 
         # Plot Classify results
         if pred_probs is not None and show_probs:
