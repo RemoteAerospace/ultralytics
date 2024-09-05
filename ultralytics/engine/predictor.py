@@ -47,6 +47,9 @@ from ultralytics.utils.checks import check_imgsz, check_imshow
 from ultralytics.utils.files import increment_path
 from ultralytics.utils.torch_utils import select_device, smart_inference_mode
 
+import subprocess
+import platform
+
 STREAM_WARNING = """
 WARNING ⚠️ inference results will accumulate in RAM unless `stream=True` is passed, causing potential out-of-memory
 errors for large sources or long-running streams and videos. See https://docs.ultralytics.com/modes/predict/ for help.
@@ -111,6 +114,9 @@ class BasePredictor:
         self.txt_path = None
         self._lock = threading.Lock()  # for automatic thread-safe inference
         callbacks.add_integration_callbacks(self)
+        self.windows = []
+        self.process = None
+        self.out = self.get_gs_pipe()
 
     def preprocess(self, im):
         """
@@ -391,7 +397,63 @@ class BasePredictor:
             cv2.namedWindow(p, cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
             cv2.resizeWindow(p, im.shape[1], im.shape[0])  # (width, height)
         cv2.imshow(p, im)
+        self.out.write(im)
         cv2.waitKey(300 if self.dataset.mode == "image" else 1)  # 1 millisecond
+        
+
+        # if self.process is None:
+        #     height, width, channels = im.shape
+        #     self.start_ffmpeg(width, height)
+
+        # try:
+        #     self.process.stdin.write(im.tobytes())
+        # except Exception as e:
+        #     print(f"Error writing to FFmpeg stdin: {e}")
+        #     self.process.stdin.close()
+        #     self.process = None
+
+    def get_gs_pipe(self):
+        fps = 30    
+        width = 1280
+        height = 720
+        out = cv2.VideoWriter('appsrc ! videoconvert' + \
+        ' ! video/x-raw,format=I420' + \
+        ' ! x264enc speed-preset=ultrafast bitrate=600 key-int-max=' + str(fps * 2) + \
+        ' ! video/x-h264,profile=baseline' + \
+        ' ! rtspclientsink location=rtsp://0.0.0.0:8554/jetson',
+        cv2.CAP_GSTREAMER, 0, fps, (width, height), True)
+
+        if not out.isOpened():
+            print("can't open video writer")
+        else:
+            print("GS created")
+        return out
+    
+
+    def start_ffmpeg(self, width, height):
+        """Start FFmpeg process for streaming."""
+        command = [
+        'ffmpeg',
+        '-y',  # overwrite output file if it exists
+        '-f', 'rawvideo',  # format
+        '-vcodec', 'rawvideo',
+        '-pix_fmt', 'bgr24',  # pixel format
+        '-s', f'{width}x{height}',  # size of one frame
+        '-r', '30',  # frames per second
+        '-i', '-',  # The input comes from a pipe
+        '-an',  # Tells FFMPEG not to expect any audio
+        '-c:v', 'libx264',  # Video codec
+        '-preset', 'ultrafast',  # To keep the latency as low as possible
+        '-tune', 'zerolatency',  # Tune for zero latency
+        '-bufsize', '32k',  # Set buffer size
+        '-f', 'rtsp',  # RTSP output format
+        '-rtsp_transport', 'tcp',  # Use TCP for RTSP
+        'rtsp://0.0.0.0:8554/jetson'  # URL of the RTSP server
+    ]
+
+
+        self.process = subprocess.Popen(command, stdin=subprocess.PIPE)
+    
 
     def run_callbacks(self, event: str):
         """Runs all registered callbacks for a specific event."""
