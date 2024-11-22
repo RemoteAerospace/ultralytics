@@ -464,12 +464,12 @@ class BasePredictor:
         '-r', '30',  # frames per second
         '-i', '-',  # The input comes from a pipe
         '-an',  # Tells FFMPEG not to expect any audio
-        '-c:v', 'libx264',  # Video codec
+        '-c:v', 'libx265',  # Video codec (H.265)
         '-preset', 'ultrafast',  # To keep the latency as low as possible
         '-tune', 'zerolatency',  # Tune for zero latency
         '-bufsize', '32k',  # Set buffer size
         '-f', 'rtsp',  # RTSP output format
         '-rtsp_transport', 'tcp',  # Use TCP for RTSP
         'rtsp://0.0.0.0:8554/jetson'  # URL of the RTSP server
-    ]
+        ]
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE)
